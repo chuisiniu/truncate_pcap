@@ -6,18 +6,34 @@
 #include <signal.h>
 
 #define MAX_PACKET 1024000
-#define TRUNCATE_MIN 34
+#define TRUNCATE_MIN 12
 #define SNAP_LEN 16128
 #define TIMEOUT 1000
 
+#define ARG_ARRAY \
+	CHOOSE(input-interface, required_argument, "i:", "--input-interface IF -i IF\tSpecify the name of interface to get packets.") \
+	CHOOSE(file, required_argument, "f:", "--file PCAP -f PCAP\tSpecify path to get packets.") \
+	CHOOSE(output-interface, required_argument, "o:", "--output-interface IF -o IF\tSpecify Name of interface to send packets.") \
+	CHOOSE(write, required_argument, "w:", "--write PCAP -w PCAP\tSpecify file to dump packets.") \
+	CHOOSE(length, required_argument, "l:", "--length NUM -l NUM\tSpecify length to truncate.") \
+	CHOOSE(verbose, no_argument, "v", "--verbose -v\tPrint more infomation.") \
+	CHOOSE(help, no_argument, "h", "--help -h\tPrint this help.")
+
+#define CHOOSE(full, has_arg, short_form, desc) \
+	{#full, has_arg, NULL, short_form[0]},
+
 struct option longopts[] = {
-	{"input-interface", required_argument, NULL, 'i'},
-	{"file", required_argument, NULL, 'f'},
-	{"output-interface", required_argument, NULL, 'o'},
-	{"write", required_argument, NULL, 'w'},
-	{"length", required_argument, NULL, 'l'},
-	{"verbose", no_argument, NULL, 'v'},
+	ARG_ARRAY
 };
+
+#undef CHOOSE
+#define CHOOSE(full, has_arg, short_form, desc) short_form
+
+const char *short_arg_string = ARG_ARRAY;
+
+#undef CHOOSE
+#define CHOOSE(full, has_arg, short_form, desc) desc "\n"
+const char *help_page = ARG_ARRAY "\nExample: tp -i ge0 -o ge1 -l 64\n";
 
 typedef enum {
 	IO_TYPE_IF,
@@ -68,7 +84,7 @@ int init_ctx_from_args(struct context *ctx, int argc, char **argv)
 	int opt;
 
 	while(1) {
-		opt = getopt_long(argc, argv, "i:f:o:w:l:v", longopts, 0);
+		opt = getopt_long(argc, argv, short_arg_string, longopts, 0);
 
 		if (opt == EOF)
 			break;
@@ -109,6 +125,9 @@ int init_ctx_from_args(struct context *ctx, int argc, char **argv)
 		case 'v':
 			ctx->verbose = 1;
 			break;
+		case 'h':
+			printf("%s", help_page);
+			exit(0);
 		}
 	}
 
@@ -117,6 +136,11 @@ int init_ctx_from_args(struct context *ctx, int argc, char **argv)
 	    || ctx->output.type < IO_TYPE_IF
 	    || ctx->output.type >= IO_TYPE_MAX) {
 		printf("Arguments is not enough.\n");
+	}
+
+	if (ctx->output.type == IO_TYPE_IF && ctx->length < 60) {
+		fprintf(stderr, "Length is length than 60, %d - 60 part will filled by 0",
+			ctx->length);
 	}
 
 	return 0;
