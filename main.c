@@ -139,8 +139,8 @@ int init_ctx_from_args(struct context *ctx, int argc, char **argv)
 	}
 
 	if (ctx->output.type == IO_TYPE_IF && ctx->length < 60) {
-		fprintf(stderr, "Length is length than 60, %d - 60 part will filled by 0",
-			ctx->length);
+		fprintf(stderr, "Length is length than 60, %d - 60 part will be"
+			" filled by 0", ctx->length);
 	}
 
 	return 0;
