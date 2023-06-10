@@ -1,3 +1,5 @@
+#include <unistd.h>
+#include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <getopt.h>
@@ -5,7 +7,8 @@
 #include <string.h>
 #include <signal.h>
 
-#define MAX_PACKET 1024000
+#define MAX_PACKET 10240000
+#define DEFAULT_PPS 1000
 #define TRUNCATE_MIN 12
 #define SNAP_LEN 16128
 #define TIMEOUT 1000
@@ -16,6 +19,8 @@
 	CHOOSE(output-interface, required_argument, "o:", "--output-interface IF -o IF\tSpecify Name of interface to send packets.") \
 	CHOOSE(write, required_argument, "w:", "--write PCAP -w PCAP\tSpecify file to dump packets.") \
 	CHOOSE(length, required_argument, "l:", "--length NUM -l NUM\tSpecify length to truncate.") \
+	CHOOSE(limit, required_argument, "L:", "--limit NUM -L NUM\tLimit the number of packets to send.") \
+	CHOOSE(pps, required_argument, "p:", "--pps NUM -p NUM\tReplay packets at a given packets/sec.") \
 	CHOOSE(verbose, no_argument, "v", "--verbose -v\tPrint more infomation.") \
 	CHOOSE(help, no_argument, "h", "--help -h\tPrint this help.")
 
@@ -54,12 +59,16 @@ struct io {
 
 	pcap_t *pcap;
 	pcap_dumper_t *dumper;
+
+	int counter;
 };
 
 struct context {
 	struct io input;
 	struct io output;
 	int length;
+	int max_send;
+	int pps;
 	int verbose;
 };
 
@@ -74,6 +83,8 @@ struct context _name = { \
 		.name = "none", \
 	}, \
 	.length = 64, \
+	.max_send = MAX_PACKET, \
+	.pps = DEFAULT_PPS, \
 	.verbose = 0, \
 }
 
@@ -92,8 +103,8 @@ int init_ctx_from_args(struct context *ctx, int argc, char **argv)
 		switch (opt) {
 		case 0:
 			break;
-		case 'i':
 		case 'f':
+		case 'i':
 			if (ctx->input.type != IO_TYPE_MAX) {
 				printf("Only one input supported.\n");
 
@@ -121,6 +132,12 @@ int init_ctx_from_args(struct context *ctx, int argc, char **argv)
 
 				exit(-1);
 			}
+			break;
+		case 'L':
+			ctx->max_send = atoi(optarg);
+			break;
+		case 'p':
+			ctx->pps = atoi(optarg);
 			break;
 		case 'v':
 			ctx->verbose = 1;
@@ -239,9 +256,16 @@ void input_to_output(struct context *ctx)
 	int ret;
 	const unsigned char *pkt;
 	struct pcap_pkthdr header;
+	int usleep_time;
+	time_t begin;
+	time_t end;
 
 	nr = 0;
 	nr_truncated = 0;
+	usleep_time = 1000000 / ctx->pps;
+	if (usleep_time < 10)
+		usleep_time = 0;
+	begin = time(NULL);
 	while (g_run) {
 		do {
 			pkt = pcap_next(ctx->input.pcap, &header);
@@ -257,6 +281,7 @@ void input_to_output(struct context *ctx)
 			       pkt[6], pkt[7], pkt[8], pkt[9], pkt[10], pkt[11],
 			       header.caplen, header.len);
 
+		nr += 1;
 		if (ctx->length < header.caplen) {
 			header.caplen = ctx->length;
 			nr_truncated++;
@@ -273,11 +298,19 @@ void input_to_output(struct context *ctx)
 			}
 		}
 
-		if (++nr >= MAX_PACKET)
+		if (ctx->max_send > 0 && ++ctx->output.counter >= ctx->max_send)
 			break;
-	}
 
-	printf("captured: %d, truncated: %d\n", nr, nr_truncated);
+		if (IO_TYPE_PCAP == ctx->input.type
+		    && IO_TYPE_IF == ctx->output.type
+		    && usleep_time > 0) {
+			usleep(usleep_time);
+		}
+	}
+	end = time(NULL);
+
+	printf("captured: %d, truncated: %d, time: %ld\n",
+	       nr, nr_truncated, end - begin);
 }
 
 void finish(struct context *ctx)
